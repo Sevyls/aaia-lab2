@@ -231,3 +231,5 @@ pyrightconfig.json
 video/kokoro
 video/slides/list.txt
 video/audio/
+video/clips/
+video/demo/

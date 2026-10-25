@@ -1,33 +1,12 @@
-"""Narrate each slide with Kokoro (local neural TTS), fit each clip to 30 s, and mux onto the silent video."""
-import shutil
+"""Narrate each slide with Kokoro (see tts.py), 30 s per slide, and mux onto the silent video.
+
+Usage: make_audio.py SILENT.mp4 OUT.mp4
+"""
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
-import espeakng_loader
-import soundfile as sf
-from kokoro_onnx import EspeakConfig, Kokoro
-
-SILENT, OUT = Path(sys.argv[1]), Path(sys.argv[2])
-HERE = Path(__file__).parent
-WORK = HERE / "audio"
-WORK.mkdir(exist_ok=True)
-VOICE, SPEED, SECONDS = "af_heart", 1.0, 30
-MODELS = HERE / "kokoro"
-RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
-for name in ("kokoro-v1.0.onnx", "voices-v1.0.bin"):
-    if not (MODELS / name).exists():
-        MODELS.mkdir(exist_ok=True)
-        print(f"downloading {name} ...")
-        urllib.request.urlretrieve(f"{RELEASE}/{name}", MODELS / name)
-# ponytail: espeak-ng truncates data paths at 160 bytes, so its data is copied to a short /tmp path.
-ESPEAK_DATA = Path("/tmp/espeak-ng-data")
-if not (ESPEAK_DATA / "phontab").exists():
-    shutil.copytree(espeakng_loader.get_data_path(), ESPEAK_DATA, dirs_exist_ok=True)
-TTS = Kokoro(str(MODELS / "kokoro-v1.0.onnx"), str(MODELS / "voices-v1.0.bin"),
-             espeak_config=EspeakConfig(lib_path=espeakng_loader.get_library_path(),
-                                        data_path=str(ESPEAK_DATA)))
+SECONDS = 30
 
 NARRATION = [
     "This is the week two verified coding agent. LangGraph replaces the hand-written loop from week one. "
@@ -74,24 +53,20 @@ NARRATION = [
     "before tests are approved. And a step limit stops work. It never proves a repair.",
 ]
 
-clips = []
-for n, text in enumerate(NARRATION, 1):
-    raw, fitted = WORK / f"k{n}.wav", WORK / f"n{n}.wav"
-    samples, rate = TTS.create(text, voice=VOICE, speed=SPEED, lang="en-us")
-    sf.write(raw, samples, rate)
-    length = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                                   "-of", "csv=p=0", str(raw)], capture_output=True, text=True, check=True).stdout)
-    print(f"slide {n}: {length:.1f}s")
-    if length > SECONDS - 0.5:
-        raise SystemExit(f"slide {n} narration too long ({length:.1f}s); shorten text or raise RATE")
-    # 0.5 s lead-in, then pad with silence to exactly one slide length.
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-af",
-                    f"adelay=500:all=1,apad,atrim=0:{SECONDS}", "-ar", "48000", "-ac", "1", str(fitted)], check=True)
-    clips.append(fitted)
+if __name__ == "__main__":
+    from tts import narrate
 
-listing = WORK / "list.txt"
-listing.write_text("".join(f"file '{c}'\n" for c in clips))
-subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(SILENT), "-f", "concat", "-safe", "0", "-i", str(listing),
-                "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest",
-                str(OUT)], check=True)
-print(OUT)
+    silent, out = Path(sys.argv[1]), Path(sys.argv[2])
+    work = Path(__file__).parent / "audio"
+    work.mkdir(exist_ok=True)
+    clips = []
+    for n, text in enumerate(NARRATION, 1):
+        fitted = work / f"n{n}.wav"
+        print(f"slide {n}: {narrate(text, fitted, SECONDS):.1f}s")
+        clips.append(fitted)
+    listing = work / "list.txt"
+    listing.write_text("".join(f"file '{c}'\n" for c in clips))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(silent), "-f", "concat", "-safe", "0", "-i", str(listing),
+                    "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest",
+                    str(out)], check=True)
+    print(out)
