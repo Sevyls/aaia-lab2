@@ -109,14 +109,18 @@ which every slide notes.
 showing captured outputs from runs 1 and 2). They are kept for reference but are not the
 submitted video.
 
-Rebuild (needs python3.12, ffmpeg, and `brew install vhs`; the first run downloads the
-Kokoro model, about 350 MB, into the git-ignored `video/kokoro/`):
+Rebuild (needs python3.12 and ffmpeg; the first run downloads the Kokoro model, about 350 MB,
+into the git-ignored `video/kokoro/`):
 
 ```bash
-video/build.sh                                       # slides, demo-silent.mp4, demo-narrated.mp4
-for t in 1-baseline 2-live 3-verify; do vhs video/tapes/$t.tape; done   # live clips; runs qwen3:8b
-video/.venv/bin/python video/make_demo.py demo-final.mp4
+video/build.sh          # slides, demo-silent.mp4, demo-narrated.mp4, demo-final.mp4 from existing clips
+video/build.sh --live   # re-record the live clips first (needs brew install vhs and qwen3:8b)
 ```
+
+`--live` resets `target-service/orders/pricing.py` to `fed594c` and lets the agent repair it
+again. It refuses to start if that file has uncommitted changes, and afterwards it warns if
+the new edit differs from the committed repair. The recorded clips in `video/clips/` are
+git-ignored, so a fresh checkout needs `--live` once before `demo-final.mp4` can be rebuilt.
 
 Slide content is in [video/slides.toml](video/slides.toml). Slide narration is in
 [video/make_audio.py](video/make_audio.py), and narration for the live segments is in
