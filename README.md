@@ -73,7 +73,7 @@ shipping 5.00, total 6.01. Rounding the unit price first would give 1.02.
 | Tool denials | `read_file("../HANDOUT.md")` → `ERROR: Use a visible relative path inside the service root`; `edit_pricing(old="Decimal", ...)` → `ERROR: old text must be nonempty and occur exactly once` |
 | `checks/smoke.py` | `SMOKE PASSED` |
 | `checks/workflow.py` | `WORKFLOW PASSED` |
-| Live run 1 (test approval denied) | Read rules, tests, and pricing; one pricing edit; `run_tests` → `DENIED`; verify: `INCOMPLETE: latest test run did not pass: DENIED: ...` (exit 2) |
+| Live run 1 (test approval denied) | Read rules, tests, and pricing; one pricing edit; `run_tests` → `DENIED`; verify: `INCOMPLETE: latest test run did not pass: DENIED: ...` (exit code not captured; the CLI returns 2 for incomplete) |
 | Live run 2 (pricing reset, approval given) | `read_file` ×3 → `edit_pricing` → `Updated orders/pricing.py once` → `run_tests` → `exit_code=0`, 10 tests OK → `VERIFIED` (exit 0) |
 | Independent rerun | 10 tests OK |
 | Protected-file diff | Empty; only `orders/pricing.py` changed (commit `87566b7`) |
