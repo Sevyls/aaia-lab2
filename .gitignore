@@ -8,7 +8,8 @@
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*
@@ -225,3 +226,8 @@ pyrightconfig.json
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/python,macos,visualstudiocode
+
+# Demo video: TTS model and build outputs (rebuild with video/build.sh)
+video/kokoro
+video/slides/list.txt
+video/audio/
