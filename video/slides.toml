@@ -1,0 +1,219 @@
+# Slide content for make_slides.py. Edit, then run: .venv/bin/python make_slides.py
+#
+# Each [[slide]] renders to slides/slideN.png (1920x1080), in order.
+#   section, time, title, caption : header and footer text
+#   size                           : monospace font size of the code panel
+#   author                         : true shows the author / AI-usage line
+#   lines                          : code panel, one row per line, verbatim (no escaping inside ''' blocks)
+# Inline colour markers switch colour for the rest of the segment:
+#   !r red   !g green   !y yellow   !b blue   !d dim grey   (no marker = default text colour)
+
+[[slide]]
+section = "1/4  Model/tool graph, verification node, bounded termination"
+time = "0:00–0:30"
+title = "LangGraph replaces the hand-written Week 1 loop"
+caption = "The framework runs the route; tool code and the verify node decide what counts"
+size = 27
+author = true
+lines = '''
+!d# starter/agent.py :: build_agent()
+graph = StateGraph(AgentState)            !d# MessagesState + completion_status, reason
+graph.add_node("model", call_model)       !d# SystemMessage + bound qwen3:8b + validate_response
+graph.add_node("tools", ToolNode(tools))  !d# list_files, read_file, edit_pricing, run_tests
+graph.add_node("verify", verify)
+graph.add_edge(START, "model")
+graph.add_conditional_edges("model", tools_condition, {"tools": "tools", END: "verify"})
+graph.add_edge("tools", "model")
+graph.add_edge("verify", END)
+
+!bSTART -> model -- native call ----> tools -> model
+!b              \-- final response --> verify -> END
+
+RUN_CONFIG = {"recursion_limit": 32, "max_concurrency": 1}
+!d# limit reached -> GraphRecursionError -> "INCOMPLETE: graph step limit reached", exit 2
+
+!d# validate_response: not AIMessage or invalid_tool_calls -> ValueError (text never parsed as a call)
+'''
+
+[[slide]]
+section = "1/4  Model/tool graph, verification node, bounded termination"
+time = "0:30–1:00"
+title = "verify trusts tool observations, not the model's final claim"
+caption = "Diagnostics exercise the routes; they do not show that a live model can repair pricing"
+size = 25
+author = false
+lines = '''
+!d# starter/agent.py :: verify(state)
+for message in state["messages"]:            !d# trusted ToolMessages, in order
+    if message.name == "edit_pricing" and content.startswith("Updated "):
+        tests_pass = False                     !d# a later edit makes earlier tests stale
+    elif message.name == "run_tests":
+        tests_pass = content.startswith("exit_code=0\n")   !d# fail / DENIED / ERROR clear it
+final = state["messages"][-1]                 !d# must be nonempty, without tool calls
+-> {"completion_status": "verified" | "incomplete", "reason": ...}
+
+$ python checks/smoke.py --agent starter/agent.py --root target-service
+!gSMOKE PASSED: two linked observations; verify correctly marks untested work incomplete.
+
+$ python checks/workflow.py --agent starter/agent.py
+!gWORKFLOW PASSED: write, approval denial/retry, test failure, stale verification,
+!g                 final gate, and step limit.
+!dScripted harmless fixtures only; a live pricing repair is still required.
+'''
+
+[[slide]]
+section = "2/4  Live native requests and linked observations"
+time = "1:00–1:30"
+title = "Live run: qwen3:8b selects the read tools"
+caption = "Native structured calls only; the model's text is never executed"
+size = 26
+author = false
+lines = '''
+$ python starter/agent.py --root target-service --model qwen3:8b --task "$(cat task.txt)"
+!dWorkspace: .../framework-agent-lab/target-service   Model: qwen3:8b
+
+!bNode: model  !yAI tool call  read_file (fdc1c16c-bd55-4cd6-b701-0b303e46721c)
+                            path: docs/business-rules.md
+!bNode: tools  !gToolMessage   name: read_file  -> "# Customer pricing rules ..."
+
+!bNode: model  !yAI tool call  read_file (847a97a1-41f7-493d-9e37-344f1c9b1a31)
+                            path: tests/test_acceptance.py
+!bNode: tools  !gToolMessage   name: read_file  -> acceptance tests (9 cases)
+
+!bNode: model  !yAI tool call  read_file (e3daddb9-8059-4d91-b0f0-db22203f35cd)
+                            path: orders/pricing.py
+!bNode: tools  !gToolMessage   name: read_file  -> baseline pricing.py
+
+!dToolNode answers each native request with a ToolMessage carrying its tool_call_id;
+!dthe observation returns to the model node for the next decision.
+'''
+
+[[slide]]
+section = "2/4  Model-selected pricing edit"
+time = "1:30–2:00"
+title = "edit_pricing: one exact replacement, pricing.py only"
+caption = "The model proposes; the tool enforces one path, one unique match, and a 12,000-byte limit"
+size = 22
+author = false
+lines = '''
+!bNode: model  !yAI tool call  edit_pricing (d88fbb7b-6ea0-415d-b05d-734fef0c4e3d)
+!dold: <exact baseline text read above>   new: <complete replacement incl. imports>
+!bNode: tools  !gToolMessage   name: edit_pricing  -> Updated orders/pricing.py once
+
+$ git diff -- target-service/orders/pricing.py        !d# reviewed before approving tests
+!r-from decimal import Decimal
+!g+from decimal import Decimal, ROUND_HALF_UP
+  from .validation import validate_order
+  def quote(lines, discount=Decimal("0")):
+      validate_order(lines, discount)
+!r-    subtotal = sum((line["unit_price"] * line["quantity"] for line in lines), Decimal("0"))
+!r-    shipping = Decimal("0") if subtotal >= Decimal("100") else Decimal("5")
+!r-    total = ((subtotal + shipping) * (1 - discount)).quantize(Decimal("0.01"))
+!g+    subtotal = Decimal("0")
+!g+    for line in lines:
+!g+        line_total = (line["unit_price"] * line["quantity"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+!g+        subtotal += line_total
+!g+    discount_amount = (subtotal * discount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+!g+    discounted_goods = subtotal - discount_amount
+!g+    shipping = Decimal("0") if discounted_goods >= Decimal("100") else Decimal("5")
+!g+    total = discounted_goods + shipping
+      return {"subtotal": subtotal, "shipping": shipping, "total": total}
+'''
+
+[[slide]]
+section = "3/4  Agent's test observation"
+time = "2:00–2:30"
+title = "Fixed test command, human approval, verified result"
+caption = "VERIFIED comes from exit_code=0 after the latest edit, not from the model's sentence"
+size = 25
+author = false
+lines = '''
+!bNode: model  !yAI tool call  run_tests (7e71bbed-ab3a-4369-97e9-a0a14c47da60)
+Proposed command: .venv/bin/python -m unittest discover -s tests -v
+Working directory: .../framework-agent-lab/target-service
+Approve this command only? Type yes: !gyes
+
+!bNode: tools  !gToolMessage   name: run_tests
+!gexit_code=0
+test_discount_amount_rounded_before_subtraction ... !gok
+!d... 7 further acceptance tests ... ok
+test_shipping_threshold_uses_discounted_goods ... !gok
+test_multi_quantity_line_rounded_after_multiplication (test_student) ... !gok
+!gRan 10 tests   OK
+
+!bNode: model  !dAI: "All tests passed successfully. The pricing implementation has been repaired correctly."
+!bNode: verify !gVERIFIED: graph ended with successful tests after the latest edit.
+$ echo $?
+!g0
+'''
+
+[[slide]]
+section = "3/4  Regression baseline failure, independent ten-test result, diff"
+time = "2:30–3:00"
+title = "Independent verification outside the agent"
+caption = "Only pricing (agent) and my regression (written before the run) changed"
+size = 24
+author = false
+lines = '''
+!d# student regression: 0.335 x 3 = 1.005 -> 1.01 (ROUND_HALF_UP); shipping 5.00; total 6.01
+$ git archive fed594c target-service   !d# baseline pricing + my test_student.py
+$ python -m unittest discover -s tests -p test_student.py -v
+!rAssertionError: Decimal('1.005') != Decimal('1.01')
+!rFAILED (failures=1)
+
+$ cd target-service && python -m unittest discover -s tests -v     !d# repaired service
+!gRan 10 tests in 0.000s
+!gOK
+
+$ git diff --exit-code fed594c -- orders/validation.py orders/service.py \
+      orders/storage.py tests/test_acceptance.py docs
+!gprotected diff: empty
+
+$ git diff --stat fed594c -- target-service
+ target-service/orders/pricing.py     | 13 +++++++++----
+ target-service/tests/test_student.py | 18 ++++++++++++++++++
+'''
+
+[[slide]]
+section = "4/4  Failure boundary and incomplete result"
+time = "3:00–3:30"
+title = "Denied requests have no side effect; denial means INCOMPLETE"
+caption = "A final reply with denied, failed, or stale test evidence cannot verify completion"
+size = 24
+author = false
+lines = '''
+!d# Checkpoint 2: tools called directly, before the graph
+read_file({"path": "../HANDOUT.md"})
+!r  -> ERROR: Use a visible relative path inside the service root      !d(traversal)
+edit_pricing({"old": "Decimal", "new": "float"})
+!r  -> ERROR: old text must be nonempty and occur exactly once         !d(ambiguous match)
+
+!d# Live run 1: same read/edit sequence, then the test request is denied
+Approve this command only? Type yes: !rno
+!bNode: tools  !rToolMessage   run_tests -> DENIED: the user did not approve this test command
+!bNode: model  !dAI: "Please approve the test command to run the fixed acceptance tests."
+!bNode: verify !rINCOMPLETE: latest test run did not pass: DENIED: the user did not approve
+!r              this test command
+
+!d# pricing.py reset with git checkout before the verified run
+'''
+
+[[slide]]
+section = "4/4  Remaining limitations"
+time = "3:30–4:00"
+title = "What remains unverified"
+caption = "Evidence: native requests, linked observations, verify node, independent tests and diff"
+size = 27
+author = true
+lines = '''
+!y- Tests cover specific cases; correctness for untested inputs is not proven.
+!y- One VERIFIED live run at temperature 0 does not show reliable repair across runs.
+!y- Tool checks are application policy, not an OS sandbox: approved tests import
+!y  model-edited code with my permissions, so I read the diff before typing yes.
+!y- The 32-step limit stops work; it does not prove the repair.
+!y- "The run stopped" and "the repair succeeded" are different claims.
+
+!dSetup:  qwen3:8b (500a1f067a9f) via local Ollama 0.40.7, temperature 0, reasoning off
+!d        Python 3.12.15, LangGraph 1.2.15, preflight: LIVE PROBE PASSED
+!dSource: https://github.com/Sevyls/aaia-lab2
+'''
