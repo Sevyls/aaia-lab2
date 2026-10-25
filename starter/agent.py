@@ -169,9 +169,11 @@ def create_model(model_name: str):
 
 def validate_response(response):
     """Accept framework messages, never parse model text as an executable call."""
-    # TODO: reject responses that are not AIMessage or have invalid_tool_calls.
-    # Return a valid response. Never parse message text into executable calls.
-    raise NotImplementedError("Complete response validation")
+    if not isinstance(response, AIMessage):
+        raise ValueError(f"Expected AIMessage, got {type(response).__name__}")
+    if response.invalid_tool_calls:
+        raise ValueError(f"Model returned invalid tool calls: {response.invalid_tool_calls}")
+    return response
 
 
 class AgentState(MessagesState):
@@ -181,11 +183,23 @@ class AgentState(MessagesState):
 
 def verify(state: AgentState):
     """Record completion from tool evidence, independently of model claims."""
-    # TODO: inspect the final response and trusted ToolMessage observations.
-    # A successful edit invalidates earlier passing tests. A later failed,
-    # denied, or errored test also invalidates success. Return completion_status
-    # and reason. A final response alone cannot establish verified completion.
-    raise NotImplementedError("Complete the verification node")
+    tests_pass, evidence = False, "no test run was observed"
+    for message in state["messages"]:
+        if not isinstance(message, ToolMessage):
+            continue
+        content = str(message.content)
+        if message.name == "edit_pricing" and content.startswith("Updated "):
+            tests_pass, evidence = False, "pricing was edited after the last test run"
+        elif message.name == "run_tests":
+            tests_pass = content.startswith("exit_code=0\n")
+            evidence = "tests passed after the latest edit" if tests_pass else (
+                f"latest test run did not pass: {content.splitlines()[0] if content else 'empty result'}")
+    final = state["messages"][-1]
+    if not isinstance(final, AIMessage) or final.tool_calls or not str(final.content).strip():
+        return {"completion_status": "incomplete", "reason": "no nonempty final response without tool calls"}
+    if not tests_pass:
+        return {"completion_status": "incomplete", "reason": evidence}
+    return {"completion_status": "verified", "reason": evidence}
 
 
 def build_agent(root: Path, model_name: str, *, model=None):
@@ -194,14 +208,18 @@ def build_agent(root: Path, model_name: str, *, model=None):
     bound_model = (create_model(model_name) if model is None else model).bind_tools(tools)
 
     def call_model(state: AgentState):
-        # TODO: prepend SystemMessage(SYSTEM_INSTRUCTION), invoke bound_model,
-        # validate the response, then return only that response under messages.
-        raise NotImplementedError("Complete the model node")
+        response = bound_model.invoke([SystemMessage(SYSTEM_INSTRUCTION), *state["messages"]])
+        return {"messages": [validate_response(response)]}
 
-    # TODO: StateGraph(AgentState) with model, tools, and verify nodes.
-    # START enters model; tools return to model. Map tools_condition's END
-    # route to verify, then connect verify to END. Return the compiled graph.
-    return None
+    graph = StateGraph(AgentState)
+    graph.add_node("model", call_model)
+    graph.add_node("tools", ToolNode(tools))
+    graph.add_node("verify", verify)
+    graph.add_edge(START, "model")
+    graph.add_conditional_edges("model", tools_condition, {"tools": "tools", END: "verify"})
+    graph.add_edge("tools", "model")
+    graph.add_edge("verify", END)
+    return graph.compile()
 
 
 def run_agent(root: Path, model_name: str, task: str, *, model=None) -> int:
