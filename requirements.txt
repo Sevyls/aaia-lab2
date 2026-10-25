@@ -1,0 +1,4 @@
+# Validated together on Python 3.12; install before class.
+langchain-core==1.6.10
+langchain-ollama==1.1.0
+langgraph==1.2.15
