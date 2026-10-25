@@ -50,7 +50,8 @@ The service is tracked in this repository rather than in a nested Git repository
 All changes are in [starter/agent.py](starter/agent.py):
 
 - `validate_response`: raises `ValueError` unless the response is an `AIMessage` without
-  `invalid_tool_calls`. Message text is never parsed into a call.
+  `invalid_tool_calls`. Message text is never parsed into a call. The CLI reports the
+  `ValueError` as `INCOMPLETE` (exit 2).
 - `call_model`: prepends `SystemMessage(SYSTEM_INSTRUCTION)`, invokes the bound model,
   validates the result, and returns only the new message.
 - Graph: `START → model`; `tools_condition` routes native calls to `ToolNode` and
@@ -64,7 +65,13 @@ Student regression: [target-service/tests/test_student.py](target-service/tests/
 Expected from the business rules: one line `0.335 × 3 = 1.005 → 1.01` (ROUND_HALF_UP),
 shipping 5.00, total 6.01. Rounding the unit price first would give 1.02.
 
+The acceptance tests are the customer's requirements, so they stay unchanged. Weakening one
+(for example, accepting `1.005` or the old total) would make the suite pass while `quote`
+still returns the wrong amount, so the reported totals would stay incorrect.
+
 ## Actual results
+
+Live runs used `task.txt` unless noted, starting from baseline pricing each time.
 
 | Check | Result |
 |---|---|
@@ -73,30 +80,65 @@ shipping 5.00, total 6.01. Rounding the unit price first would give 1.02.
 | Tool denials | `read_file("../HANDOUT.md")` → `ERROR: Use a visible relative path inside the service root`; `edit_pricing(old="Decimal", ...)` → `ERROR: old text must be nonempty and occur exactly once` |
 | `checks/smoke.py` | `SMOKE PASSED` |
 | `checks/workflow.py` | `WORKFLOW PASSED` |
-| Live run 1 (test approval denied) | Read rules, tests, and pricing; one pricing edit; `run_tests` → `DENIED`; verify: `INCOMPLETE: latest test run did not pass: DENIED: ...` (exit code not captured; the CLI returns 2 for incomplete) |
-| Live run 2 (pricing reset, approval given) | `read_file` ×3 → `edit_pricing` → `Updated orders/pricing.py once` → `run_tests` → `exit_code=0`, 10 tests OK → `VERIFIED` (exit 0) |
+| Malformed responses (scripted model) | `invalid_tool_calls` → `ValueError`; non-`AIMessage` → `ValueError`; JSON-looking text → no tool executed, `incomplete` |
+| Live run 1: human typed `no` | Read rules, tests, and pricing; one pricing edit; `run_tests` → `DENIED`; verify: `INCOMPLETE: latest test run did not pass: DENIED: ...` (exit code not captured) |
+| Live run 2: human typed `yes` | `read_file` ×3 → `edit_pricing` → `Updated orders/pricing.py once` → `run_tests` → `exit_code=0`, 10 tests OK → `VERIFIED` (exit 0); committed as `87566b7` |
+| Live run 3: recorded with VHS, scripted `yes` | Same sequence; `run_tests` call `3f09b577…` → `exit_code=0`, 10 tests OK → `VERIFIED` (exit 0); edit identical to `87566b7` |
+| Live run 4: read-only task, recorded | Model answered without any tool call → `INCOMPLETE: no test run was observed`, exit code 2 |
 | Independent rerun | 10 tests OK |
-| Protected-file diff | Empty; only `orders/pricing.py` changed (commit `87566b7`) |
+| Protected-file diff | Empty; only `orders/pricing.py` and `tests/test_student.py` differ from `fed594c` |
 
 ## Demo video
 
-`demo-silent.mp4` and `demo-narrated.mp4` (4:00, 8 slides of 30 s) are submitted separately
-and are not tracked in git. Slides show captured outputs from the runs above; the narrated
-version uses an AI-generated voice (Kokoro TTS, `af_heart`), noted on every slide.
+**Submitted video: [demo-final.mp4](demo-final.mp4)** (4:00, 1920×1080, AI-generated narration).
+
+| Time | Content | Source |
+|---|---|---|
+| 0:00–1:00 | Graph wiring, `verify` rule, step limit, diagnostics | Slides 1–2 |
+| 1:00–1:20 | Pricing reset to `fed594c`; student regression fails | Live recording (0.5×) |
+| 1:20–2:40 | Live run 3: native calls, linked observations, pricing edit, tests, `VERIFIED`, exit 0 | Live recording (0.5×) |
+| 2:40–3:30 | Diff, 10 tests, protected diff, denials, live run 4 (`INCOMPLETE`, exit 2) | Live recording (0.91×) |
+| 3:30–4:00 | Remaining limitations | Slide 8 |
+
+The live segments are real terminal recordings made with [VHS](https://github.com/charmbracelet/vhs).
+VHS types the commands, including `yes` at the approval prompt, and the video says so on screen.
+The human-approved repair is live run 2 above. The narration uses Kokoro TTS (`af_heart`),
+which every slide notes.
+
+`demo-silent.mp4` and `demo-narrated.mp4` are earlier slide-only versions (8 slides of 30 s,
+showing captured outputs from runs 1 and 2). They are kept for reference but are not the
+submitted video.
+
+Rebuild (needs python3.12, ffmpeg, and `brew install vhs`; the first run downloads the
+Kokoro model, about 350 MB, into the git-ignored `video/kokoro/`):
 
 ```bash
-video/build.sh   # needs python3.12 and ffmpeg; downloads the Kokoro model (~350 MB) on first run
+video/build.sh                                       # slides, demo-silent.mp4, demo-narrated.mp4
+for t in 1-baseline 2-live 3-verify; do vhs video/tapes/$t.tape; done   # live clips; runs qwen3:8b
+video/.venv/bin/python video/make_demo.py demo-final.mp4
 ```
 
-Edit slide content in [video/slides.toml](video/slides.toml) and narration in
-[video/make_audio.py](video/make_audio.py) (one entry per slide).
+Slide content is in [video/slides.toml](video/slides.toml). Slide narration is in
+[video/make_audio.py](video/make_audio.py), and narration for the live segments is in
+[video/make_demo.py](video/make_demo.py).
+
+## AI usage
+
+Claude Opus 5.5 (Claude Code) assisted with this submission. It implemented the four TODOs
+in `starter/agent.py`, drafted `tests/test_student.py`, the README, and the questionnaire,
+and built the demo video tooling and narration. The pricing repair itself was made by
+`qwen3:8b` through `edit_pricing` in the live runs.
 
 ## Limitations
 
 - Tests cover specific cases; passing them does not prove pricing is correct for all inputs.
-- One verified run at temperature 0 does not establish that the model repairs reliably.
+- Two verified runs at temperature 0 produced the same edit. That does not establish
+  reliability for other tasks, models, or settings.
 - Tool checks are application policy, not an OS sandbox: approved tests import
   model-edited code with the user's permissions, so the diff is reviewed before approval.
+- The repaired `quote` returns shipping as `Decimal("5")` or `Decimal("0")`, not quantized to
+  cents. The tests pass because Decimal equality ignores the exponent, but the printed value
+  is `5`, not `5.00`.
 - VS Code test discovery uses pytest via `pytest.ini`, a local convenience only.
   pytest is not in the lock file, and the handout's unittest commands are the
   evidence of record.
