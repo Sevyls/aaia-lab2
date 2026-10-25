@@ -8,6 +8,9 @@
 # Inline colour markers switch colour for the rest of the segment:
 #   !r red   !g green   !y yellow   !b blue   !d dim grey   (no marker = default text colour)
 
+# Shown bottom-right on every slide; leave empty to hide.
+audio_note = "Narration: AI-generated voice (Kokoro TTS, af_heart)"
+
 [[slide]]
 section = "1/4  Model/tool graph, verification node, bounded termination"
 time = "0:00–0:30"

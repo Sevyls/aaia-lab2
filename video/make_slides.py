@@ -33,7 +33,7 @@ def draw_line(draw, x, y, raw, mono):
         x += draw.textlength(part, font=mono)
 
 
-def render(n, slide):
+def render(n, slide, note=""):
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
     d.rectangle([0, 0, W, 8], fill=ACCENT)
@@ -50,6 +50,9 @@ def render(n, slide):
     d.text((70, 975), slide["caption"], font=font(SANS, 32), fill=FG)
     if slide.get("author"):
         d.text((70, 1025), AUTHOR, font=font(SANS, 26), fill=DIM)
+    if note:
+        small = font(SANS, 26)
+        d.text((W - 70 - d.textlength(note, font=small), 1025), note, font=small, fill=DIM)
     path = WORK / f"slide{n}.png"
     img.save(path)
     return path
@@ -59,6 +62,6 @@ if __name__ == "__main__":
     WORK.mkdir(exist_ok=True)
     for old in WORK.glob("slide*.png"):
         old.unlink()
-    slides = tomllib.loads(CONTENT.read_text(encoding="utf-8"))["slide"]
-    for n, slide in enumerate(slides, 1):
-        print(render(n, slide))
+    content = tomllib.loads(CONTENT.read_text(encoding="utf-8"))
+    for n, slide in enumerate(content["slide"], 1):
+        print(render(n, slide, content.get("audio_note", "")))

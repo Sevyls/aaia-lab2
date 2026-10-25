@@ -78,6 +78,19 @@ shipping 5.00, total 6.01. Rounding the unit price first would give 1.02.
 | Independent rerun | 10 tests OK |
 | Protected-file diff | Empty; only `orders/pricing.py` changed (commit `87566b7`) |
 
+## Demo video
+
+`demo-silent.mp4` and `demo-narrated.mp4` (4:00, 8 slides of 30 s) are submitted separately
+and are not tracked in git. Slides show captured outputs from the runs above; the narrated
+version uses an AI-generated voice (Kokoro TTS, `af_heart`), noted on every slide.
+
+```bash
+video/build.sh   # needs python3.12 and ffmpeg; downloads the Kokoro model (~350 MB) on first run
+```
+
+Edit slide content in [video/slides.toml](video/slides.toml) and narration in
+[video/make_audio.py](video/make_audio.py) (one entry per slide).
+
 ## Limitations
 
 - Tests cover specific cases; passing them does not prove pricing is correct for all inputs.
